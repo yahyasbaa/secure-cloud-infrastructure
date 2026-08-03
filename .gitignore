@@ -1,0 +1,38 @@
+# Tooling / caches
+.tools/
+.local/
+reports/
+.pytest_cache/
+__pycache__/
+*.pyc
+.venv/
+
+# Terraform: never commit state, plans, local data dirs or account-specific backend config
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+crash.*.log
+*.tfvars.json
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+terraform/environments/*/backend.hcl
+!terraform/environments/local/backend.hcl
+
+# Secrets: only the placeholder template is tracked
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+
+# OS / editor noise
+.DS_Store
+.idea/
+.vscode/
+*.swp

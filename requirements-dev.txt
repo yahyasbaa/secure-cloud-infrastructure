@@ -1,0 +1,8 @@
+# Test / local-validation tooling (pinned). The app runtime deps (app/requirements.txt,
+# hash-locked) are installed into the same venv first by scripts/install-tools.sh.
+pytest==9.1.1
+python-hcl2==8.1.4
+boto3==1.43.107
+moto[server]==5.2.3
+PyYAML==6.0.3
+policy_sentry==0.15.2
