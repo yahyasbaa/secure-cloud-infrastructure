@@ -1,0 +1,51 @@
+# Local run of the application with a throw-away PostgreSQL.
+#   make run-local     (generates .env with random secrets if missing)
+#   make smoke         (build, start, run HTTPS smoke tests, stop)
+# Secrets come from ../.env (git-ignored), never from this file.
+name: sci-local
+
+services:
+  db:
+    image: postgres:17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24
+    environment:
+      POSTGRES_DB: app
+      POSTGRES_USER: ${DB_USER:?set in .env}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?set in .env}
+    networks: [backend]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d app"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    security_opt: ["no-new-privileges:true"]
+    tmpfs: ["/var/lib/postgresql/data"]
+
+  app:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: ${IMAGE:-sci-app:local}
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      APP_RUNTIME: local
+      APP_API_TOKEN: ${APP_API_TOKEN:?set in .env}
+      DB_HOST: db
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_SSLMODE: prefer # local-only: the throw-away database has no TLS certificate
+    ports:
+      - "127.0.0.1:8443:8443" # loopback only
+    networks: [backend, frontend]
+    read_only: true
+    tmpfs: ["/tmp:rw,noexec,nosuid,nodev,size=32m"]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 512m
+    pids_limit: 256
+
+networks:
+  backend:
+    internal: true # the database is unreachable from outside the compose network
+  frontend: {}
