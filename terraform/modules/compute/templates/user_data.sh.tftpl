@@ -1,0 +1,49 @@
+#!/bin/bash
+# Bootstrap for application hosts (Amazon Linux 2023, private subnet, no
+# internet route). Everything is fetched through VPC endpoints:
+#   dnf repos + image layers -> S3 gateway endpoint
+#   SSM / ECR / Secrets Manager / CloudWatch Logs -> interface endpoints
+# No secret values pass through user data: the container receives only
+# Secrets Manager ARNs and resolves them at runtime with the instance role.
+set -euo pipefail
+exec > >(logger -t sci-bootstrap) 2>&1
+
+REGION="${region}"
+REGISTRY="${account_id}.dkr.ecr.${region}.amazonaws.com"
+REPOSITORY="${ecr_repository}"
+
+dnf -y upgrade --security
+dnf -y install docker
+systemctl enable --now docker
+
+IMAGE_TAG="$(aws ssm get-parameter --region "$REGION" --name "${image_tag_parameter}" --query Parameter.Value --output text)"
+aws ecr get-login-password --region "$REGION" | docker login --username AWS --password-stdin "$REGISTRY"
+docker pull "$REGISTRY/$REPOSITORY:$IMAGE_TAG"
+docker logout "$REGISTRY"
+
+INSTANCE_ID="$(TOKEN=$(curl -sS -X PUT http://169.254.169.254/latest/api/token -H 'X-aws-ec2-metadata-token-ttl-seconds: 60') && curl -sS -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/instance-id)"
+
+# Hardened container runtime:
+#   read-only root fs, only a small noexec tmpfs is writable
+#   all Linux capabilities dropped, no privilege escalation
+#   bounded memory / pids, non-root user baked into the image
+#   host networking so IMDSv2 hop limit can stay at 1
+docker run -d --name app --restart unless-stopped \
+  --network host \
+  --read-only --tmpfs /tmp:rw,noexec,nosuid,nodev,size=32m \
+  --cap-drop ALL --security-opt no-new-privileges:true \
+  --memory 512m --pids-limit 256 \
+  --log-driver awslogs \
+  --log-opt awslogs-region="$REGION" \
+  --log-opt awslogs-group="${app_log_group}" \
+  --log-opt awslogs-stream="$INSTANCE_ID" \
+  -e APP_RUNTIME=aws \
+  -e AWS_REGION="$REGION" \
+  -e PORT="${app_port}" \
+  -e APP_SECRET_ARN="${app_secret_arn}" \
+  -e DB_SECRET_ARN="${db_secret_arn}" \
+  -e DB_HOST="${db_host}" \
+  -e DB_PORT="${db_port}" \
+  -e DB_NAME="${db_name}" \
+  -e DB_SSLMODE=verify-full \
+  "$REGISTRY/$REPOSITORY:$IMAGE_TAG"
