@@ -1,0 +1,69 @@
+# Project-specific Semgrep rules. They encode the security conventions of
+# this codebase so regressions are caught in review, in addition to the
+# community rule packs (p/python, p/flask, p/secrets, ...).
+rules:
+  - id: sci-flask-debug-enabled
+    languages: [python]
+    severity: ERROR
+    message: Flask debug mode exposes an interactive debugger (RCE). Never enable it.
+    pattern-either:
+      - pattern: $APP.run(..., debug=True, ...)
+      - pattern: $APP.config["DEBUG"] = True
+      - pattern: $APP.debug = True
+
+  - id: sci-non-constant-time-secret-compare
+    languages: [python]
+    severity: ERROR
+    message: Compare tokens with hmac.compare_digest to avoid timing attacks.
+    patterns:
+      - pattern-either:
+          - pattern: $TOKEN == $OTHER
+          - pattern: $TOKEN != $OTHER
+      - metavariable-regex:
+          metavariable: $TOKEN
+          regex: (?i).*(token|secret|password|api_key).*
+
+  - id: sci-sql-built-with-string-formatting
+    languages: [python]
+    severity: ERROR
+    message: Build SQL with parameters (%s placeholders), never with string formatting.
+    pattern-either:
+      - pattern: $CUR.execute(f"...", ...)
+      - pattern: $CUR.execute("..." % $X, ...)
+      - pattern: $CUR.execute("..." + $X, ...)
+      - pattern: $CUR.execute("...".format(...), ...)
+
+  - id: sci-tls-verification-disabled
+    languages: [python]
+    severity: ERROR
+    message: TLS certificate verification must not be disabled.
+    pattern-either:
+      - pattern: requests.$M(..., verify=False, ...)
+      - pattern: ssl._create_unverified_context(...)
+      - pattern: psycopg.connect(..., sslmode="disable", ...)
+
+  - id: sci-secret-logged
+    languages: [python]
+    severity: ERROR
+    message: Do not log secrets or Authorization headers.
+    patterns:
+      - pattern-either:
+          - pattern: $LOG.$LEVEL(..., $X, ...)
+          - pattern: '$LOG.$LEVEL(..., extra={..., $K: $X, ...}, ...)'
+      - metavariable-regex:
+          metavariable: $LEVEL
+          regex: ^(debug|info|warning|error|exception|critical)$
+      - metavariable-regex:
+          metavariable: $X
+          regex: (?i).*(password|secret|token|authorization).*
+      # string literals such as event names ("secret_lookup_failed") are fine
+      - metavariable-pattern:
+          metavariable: $X
+          patterns:
+            - pattern-not: '"..."'
+
+  - id: sci-shell-injection
+    languages: [python]
+    severity: ERROR
+    message: Avoid shell=True; pass an argument list.
+    pattern: subprocess.$F(..., shell=True, ...)

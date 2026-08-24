@@ -1,0 +1,14 @@
+# Checkov configuration shared by `make security-scan` and CI.
+# There is deliberately NO global skip-check list: every exception is an
+# inline `#checkov:skip=<ID>:<reason>` next to the resource it applies to and
+# is registered in security/suppressions.md (enforced by tests).
+compact: true
+quiet: true
+soft-fail: false
+download-external-modules: false
+evaluate-variables: true
+framework:
+  - terraform
+  - dockerfile
+  - github_actions
+  - secrets

@@ -1,0 +1,21 @@
+# Gitleaks configuration: the full upstream rule set plus project paths that
+# only ever contain third-party or generated content.
+title = "secure-cloud-infrastructure"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Vendored tools, generated reports and local emulator state"
+paths = [
+  '''^\.tools/''',
+  '''^\.local/''',
+  '''^reports/''',
+  '''(^|/)\.terraform/''',
+  '''(^|/)\.pytest_cache/''',
+  '''(^|/)__pycache__/''',
+  '''^\.git/''',
+  # Locally generated docker-compose secrets (git-ignored). The scan script
+  # separately fails the build if .env is ever tracked by git.
+  '''^\.env$''',
+]
