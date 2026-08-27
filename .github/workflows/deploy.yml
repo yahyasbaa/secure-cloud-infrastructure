@@ -1,0 +1,60 @@
+# Ships a new application image to the dev environment.
+#
+# * Runs the complete CI pipeline first; deployment only starts if every
+#   security gate passed.
+# * Authenticates to AWS with GitHub OIDC: no AWS keys are stored anywhere.
+#   The role ARN is a (non-secret) environment variable; the role's trust
+#   policy only accepts tokens for this repository AND the `dev` environment,
+#   whose protection rules (reviewers / branch policy) GitHub enforces first.
+# * The deployment role can only push to one ECR repository, update one SSM
+#   parameter and roll one Auto Scaling group.
+name: deploy
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: [app/**, docker/**]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-dev
+  cancel-in-progress: false
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+      security-events: write
+
+  deploy:
+    name: Deploy to dev
+    needs: [ci]
+    if: vars.AWS_DEPLOY_ROLE_ARN != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: dev
+    permissions:
+      contents: read
+      id-token: write # required to request the OIDC token
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install trivy
+        run: scripts/install-tools.sh trivy
+      - name: Configure AWS credentials (OIDC, short-lived)
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-session-name: gha-deploy-${{ github.run_id }}
+          role-duration-seconds: 3600
+      - name: Build, scan, push and roll out
+        env:
+          ENVIRONMENT_NAME: ${{ vars.SCI_NAME }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: scripts/deploy-image.sh "$ENVIRONMENT_NAME" "$IMAGE_TAG"

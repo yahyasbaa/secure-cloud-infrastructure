@@ -1,0 +1,237 @@
+# Security CI pipeline. Every job is a gate: a failing scanner, test or
+# check fails the pipeline (no `continue-on-error` on any gate).
+#
+#   terraform fmt / validate / test / tflint
+#   IaC security scan (checkov, tfsec, trivy config)
+#   secret scan (gitleaks: working tree + full git history)
+#   SAST (semgrep)
+#   dependency + container scan (trivy) and SBOM
+#   unit + security tests (pytest)
+#   local integration (deploy to moto, posture tests, destroy)
+#   build (only after every gate passed)
+#
+# Hardening: actions pinned to commit SHAs, read-only token by default,
+# checkout without persisted credentials, no pull_request_target, timeouts.
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+  TF_IN_AUTOMATION: "1"
+
+jobs:
+  terraform:
+    name: Terraform fmt / validate / test / lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .tools/dl
+          key: tools-dl-${{ runner.os }}-${{ hashFiles('scripts/install-tools.sh') }}
+      - name: Install pinned tools
+        run: scripts/install-tools.sh terraform tflint
+      - name: terraform fmt
+        run: make fmt-check
+      - name: terraform validate
+        run: make tf-validate
+      - name: terraform test (offline, mocked provider)
+        run: make tf-test
+      - name: tflint
+        run: make tflint
+
+  iac-scan:
+    name: IaC security scan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .tools/dl
+          key: tools-dl-${{ runner.os }}-${{ hashFiles('scripts/install-tools.sh') }}
+      - name: Install pinned tools
+        run: scripts/install-tools.sh terraform tfsec trivy tflint checkov
+      - name: checkov + tfsec + trivy config + tflint
+        run: scripts/security-scan.sh iac
+      - name: Upload checkov SARIF
+        if: always() && hashFiles('reports/checkov.sarif') != ''
+        uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+        continue-on-error: true # reporting only; the scan step above is the gate
+        with:
+          sarif_file: reports/checkov.sarif
+          category: checkov
+      - name: Upload trivy config SARIF
+        if: always() && hashFiles('reports/trivy-config.sarif') != ''
+        uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+        continue-on-error: true # reporting only; the scan step above is the gate
+        with:
+          sarif_file: reports/trivy-config.sarif
+          category: trivy-config
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: iac-scan-reports
+          path: reports/
+          retention-days: 30
+
+  secret-scan:
+    name: Secret scan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0 # scan the full history, not just the tip
+      - name: Install gitleaks
+        run: scripts/install-tools.sh gitleaks
+      - name: gitleaks (tree + history)
+        run: scripts/security-scan.sh secrets
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: secret-scan-reports
+          path: reports/
+          retention-days: 30
+
+  sast:
+    name: SAST (semgrep) + workflow lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Install pinned tools
+        run: scripts/install-tools.sh semgrep actionlint
+      - name: semgrep
+        run: scripts/security-scan.sh code
+      - name: actionlint
+        run: scripts/security-scan.sh workflows
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: sast-reports
+          path: reports/
+          retention-days: 30
+
+  tests:
+    name: Unit + security tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Install pinned tools
+        run: scripts/install-tools.sh terraform dev
+      - name: Unit tests
+        run: make unit-test
+      - name: Security configuration tests
+        run: make security-test
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: test-reports
+          path: reports/
+          retention-days: 30
+
+  container:
+    name: Dependency + container scan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install trivy
+        run: scripts/install-tools.sh trivy
+      - name: Dependency vulnerabilities
+        run: scripts/security-scan.sh deps
+      - name: Build image
+        run: make docker-build
+      - name: Image vulnerabilities, secrets and misconfigurations (+ SBOM)
+        run: SKIP_IMAGE_BUILD=1 scripts/security-scan.sh image
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: container-reports
+          path: reports/
+          retention-days: 30
+
+  local-integration:
+    name: Deploy to local AWS emulator + posture tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    needs: [terraform]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Install pinned tools
+        run: scripts/install-tools.sh terraform dev
+      - name: plan -> apply -> live posture tests -> destroy (moto)
+        run: make local-stack
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: local-integration-reports
+          path: |
+            reports/junit-live-local.xml
+            reports/local-plan.json
+          retention-days: 30
+
+  build:
+    name: Build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    needs: [terraform, iac-scan, secret-scan, sast, tests, container, local-integration]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build release image
+        env:
+          IMAGE: sci-app:${{ github.sha }}
+        run: |
+          make docker-build IMAGE="$IMAGE"
+          docker save "$IMAGE" | gzip > sci-app-image.tar.gz
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: sci-app-image
+          path: sci-app-image.tar.gz
+          retention-days: 7
