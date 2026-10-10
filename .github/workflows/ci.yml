@@ -92,7 +92,7 @@ jobs:
         with:
           sarif_file: reports/trivy-config.sarif
           category: trivy-config
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: iac-scan-reports
@@ -112,7 +112,7 @@ jobs:
         run: scripts/install-tools.sh gitleaks
       - name: gitleaks (tree + history)
         run: scripts/security-scan.sh secrets
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: secret-scan-reports
@@ -136,7 +136,7 @@ jobs:
         run: scripts/security-scan.sh code
       - name: actionlint
         run: scripts/security-scan.sh workflows
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: sast-reports
@@ -160,7 +160,7 @@ jobs:
         run: make unit-test
       - name: Security configuration tests
         run: make security-test
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: test-reports
@@ -183,7 +183,7 @@ jobs:
         run: make docker-build
       - name: Image vulnerabilities, secrets and misconfigurations (+ SBOM)
         run: SKIP_IMAGE_BUILD=1 scripts/security-scan.sh image
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: container-reports
@@ -206,7 +206,7 @@ jobs:
         run: scripts/install-tools.sh terraform dev
       - name: plan -> apply -> live posture tests -> destroy (moto)
         run: make local-stack
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: local-integration-reports
@@ -230,7 +230,7 @@ jobs:
         run: |
           make docker-build IMAGE="$IMAGE"
           docker save "$IMAGE" | gzip > sci-app-image.tar.gz
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: sci-app-image
           path: sci-app-image.tar.gz
