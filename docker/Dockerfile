@@ -8,7 +8,7 @@
 #  * works with a read-only root filesystem (writes only to /tmp, a tmpfs)
 #  * RDS CA bundle pinned by checksum so the app can use sslmode=verify-full
 
-FROM python:3.12-slim-trixie@sha256:dddfd7e07f9d15aeeca61529320492139d21cac7f0070c00609243e51e4e0016 AS build
+FROM python:3.15-slim-trixie@sha256:94d3426f1def7db4a106a232ac121bfd975393e5dfd40a619b955fae45fe7913 AS build
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_NO_CACHE_DIR=1 \
     PYTHONDONTWRITEBYTECODE=1
@@ -17,7 +17,7 @@ COPY app/requirements.txt .
 RUN python -m venv /opt/venv \
  && /opt/venv/bin/pip install --require-hashes --no-deps -r requirements.txt
 
-FROM python:3.12-slim-trixie@sha256:dddfd7e07f9d15aeeca61529320492139d21cac7f0070c00609243e51e4e0016 AS runtime
+FROM python:3.15-slim-trixie@sha256:94d3426f1def7db4a106a232ac121bfd975393e5dfd40a619b955fae45fe7913 AS runtime
 LABEL org.opencontainers.image.title="sci-app" \
       org.opencontainers.image.description="Secure Cloud Infrastructure demo API" \
       org.opencontainers.image.licenses="MIT"
